@@ -1,0 +1,95 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      args:
+        PHP_VERSION: "8.3"
+    container_name: hotel_management_app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./:/var/www/html
+      - ./docker/php/php.ini:/usr/local/etc/php/conf.d/99-hotel-management.ini:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      REDIS_HOST: redis
+    networks:
+      - hotel_management
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: hotel_management_nginx
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8084}:80"
+    volumes:
+      - ./:/var/www/html:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+    networks:
+      - hotel_management
+
+  mysql:
+    image: mysql:8.4
+    container_name: hotel_management_mysql
+    restart: unless-stopped
+    ports:
+      - "${FORWARD_DB_PORT:-3307}:3306"
+    environment:
+      MYSQL_DATABASE: "${MYSQL_DATABASE:-hotel_management}"
+      MYSQL_USER: "${MYSQL_USER:-hotel_management}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-secret}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-root}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p\"$${MYSQL_ROOT_PASSWORD}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hotel_management
+
+  phpmyadmin:
+    image: phpmyadmin:5.2-apache
+    container_name: hotel_management_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "${PHPMYADMIN_PORT:-8082}:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      UPLOAD_LIMIT: "${PHPMYADMIN_UPLOAD_LIMIT:-128M}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - hotel_management
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: hotel_management_redis
+    restart: unless-stopped
+    ports:
+      - "${FORWARD_REDIS_PORT:-6379}:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - hotel_management
+
+networks:
+  hotel_management:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:
