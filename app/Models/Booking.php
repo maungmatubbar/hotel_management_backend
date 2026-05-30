@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\BookingStatus;
+use Database\Factories\BookingFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,6 +14,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
     'tenant_id',
+    'booking_number',
     'user_id',
     'room_id',
     'guest_name',
@@ -32,8 +35,22 @@ class Booking extends Model
 {
     public const NID_IMAGE_CATEGORY = 'booking_nid_image';
 
-    /** @use HasFactory<\Database\Factories\BookingFactory> */
+    /** @use HasFactory<BookingFactory> */
     use HasFactory, SoftDeletes;
+
+    /**
+     * The model's default values for attributes.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'status' => BookingStatus::Pending->value,
+    ];
+
+    public static function numberForId(int $id): string
+    {
+        return 'BKG-'.str_pad((string) $id, 6, '0', STR_PAD_LEFT);
+    }
 
     /**
      * Get the attributes that should be cast.
@@ -47,6 +64,7 @@ class Booking extends Model
             'check_out' => 'date',
             'room_id' => 'integer',
             'room_quantity' => 'integer',
+            'status' => BookingStatus::class,
         ];
     }
 

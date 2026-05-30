@@ -2,10 +2,11 @@
 
 namespace App\Http\Requests;
 
-use App\Domain\Booking\DTO\BookingDataRequest;
+use App\Enums\BookingStatus;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
-class StoreBookingRequest extends FormRequest
+class UpdateBookingStatusRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -22,6 +23,8 @@ class StoreBookingRequest extends FormRequest
      */
     public function rules(): array
     {
-        return BookingDataRequest::rules();
+        return [
+            'status' => ['required', 'string', Rule::enum(BookingStatus::class)],
+        ];
     }
 }

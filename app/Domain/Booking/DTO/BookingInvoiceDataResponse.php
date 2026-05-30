@@ -23,12 +23,13 @@ class BookingInvoiceDataResponse extends Data
         public readonly string $status,
         public readonly string $issued_at,
         public readonly ?string $due_at,
+        public readonly string $download_url,
         public readonly array $payments = [],
     ) {}
 
     public static function fromInvoice(Invoice $invoice): self
     {
-        $invoice->loadMissing('payments.receipt');
+        $invoice->loadMissing(['booking', 'payments.receipt']);
 
         return new self(
             id: $invoice->id,
@@ -41,6 +42,10 @@ class BookingInvoiceDataResponse extends Data
             status: $invoice->status,
             issued_at: $invoice->issued_at->toDateTimeString(),
             due_at: $invoice->due_at?->toDateTimeString(),
+            download_url: route('tenants.bookings.invoice.download', [
+                'tenant' => $invoice->booking->tenant_id,
+                'booking' => $invoice->booking_id,
+            ]),
             payments: $invoice->payments
                 ->map(fn ($payment): BookingPaymentDataResponse => BookingPaymentDataResponse::fromPayment($payment))
                 ->values()

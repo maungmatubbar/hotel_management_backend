@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\BookingStatus;
 use App\Models\Booking;
 use App\Models\File as FileRecord;
 use App\Models\Room;
@@ -8,14 +9,18 @@ use App\Models\User;
 use Database\Seeders\SuperAdminRoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use Spatie\LaravelPdf\Facades\Pdf;
+use Spatie\LaravelPdf\PdfBuilder;
 use Spatie\Permission\Models\Role;
 
 use function Pest\Laravel\assertDatabaseHas;
 use function Pest\Laravel\deleteJson;
+use function Pest\Laravel\get;
 use function Pest\Laravel\getJson;
 use function Pest\Laravel\patchJson;
 use function Pest\Laravel\post;
@@ -653,9 +658,13 @@ test('tenant bookings are stored in the tenant database', function () {
 
     $bookingId = $bookingResponse->json('data.id');
 
+    expect($bookingResponse->json('data.booking_number'))->toBe(Booking::numberForId($bookingId))
+        ->and($bookingResponse->json('data.status'))->toBe(BookingStatus::Pending->value);
+
     expect(DB::connection()->getSchemaBuilder()->hasTable('bookings'))->toBeTrue()
         ->and(DB::connection()->getSchemaBuilder()->getColumnListing('bookings'))->toContain(
             'tenant_id',
+            'booking_number',
             'room_id',
             'guest_name',
             'guest_phone',
@@ -669,6 +678,7 @@ test('tenant bookings are stored in the tenant database', function () {
             'promo_code',
             'check_in',
             'check_out',
+            'status',
         )
         ->and(DB::table('bookings')->count())->toBe(0);
 
@@ -685,6 +695,7 @@ test('tenant bookings are stored in the tenant database', function () {
     try {
         expect(Booking::query()
             ->where('tenant_id', 'hotel-alpha')
+            ->where('booking_number', Booking::numberForId($bookingId))
             ->where('user_id', $guest->id)
             ->where('room_id', $room->id)
             ->where('guest_email', 'guest@example.com')
@@ -697,6 +708,7 @@ test('tenant bookings are stored in the tenant database', function () {
             ->where('discount', 10)
             ->where('check_in', '2026-06-01')
             ->where('check_out', '2026-06-03')
+            ->where('status', BookingStatus::Pending->value)
             ->where('deleted_at', null)
             ->exists())->toBeTrue();
     } finally {
@@ -707,12 +719,14 @@ test('tenant bookings are stored in the tenant database', function () {
         ->assertSuccessful()
         ->assertJsonPath('success', true)
         ->assertJsonPath('data.data.0.tenant_id', 'hotel-alpha')
+        ->assertJsonPath('data.data.0.booking_number', Booking::numberForId($bookingId))
         ->assertJsonPath('data.data.0.user_id', $guest->id)
         ->assertJsonPath('data.data.0.room_id', $room->id)
         ->assertJsonPath('data.data.0.guest_name', 'Guest One')
         ->assertJsonPath('data.data.0.room', 'Business Twin Room')
         ->assertJsonPath('data.data.0.assigned_room_number', '301')
         ->assertJsonPath('data.data.0.discount', '10.00')
+        ->assertJsonPath('data.data.0.status', BookingStatus::Pending->value)
         ->assertJsonPath('data.current_page', 1)
         ->assertJsonPath('data.per_page', 15)
         ->assertJsonPath('data.total', 1);
@@ -721,13 +735,23 @@ test('tenant bookings are stored in the tenant database', function () {
         ->assertSuccessful()
         ->assertJsonPath('success', true)
         ->assertJsonPath('data.id', $bookingId)
+        ->assertJsonPath('data.booking_number', Booking::numberForId($bookingId))
         ->assertJsonPath('data.tenant_id', 'hotel-alpha')
         ->assertJsonPath('data.user_id', $guest->id)
         ->assertJsonPath('data.room_id', $room->id)
         ->assertJsonPath('data.guest_name', 'Guest One')
         ->assertJsonPath('data.room', 'Business Twin Room')
         ->assertJsonPath('data.assigned_room_number', '301')
-        ->assertJsonPath('data.discount', '10.00');
+        ->assertJsonPath('data.discount', '10.00')
+        ->assertJsonPath('data.status', BookingStatus::Pending->value);
+
+    patchJson("/api/tenants/hotel-alpha/bookings/{$bookingId}/status", [
+        'status' => BookingStatus::Confirmed->value,
+    ])
+        ->assertSuccessful()
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.id', $bookingId)
+        ->assertJsonPath('data.status', BookingStatus::Confirmed->value);
 });
 
 test('tenant user can filter and paginate bookings', function () {
@@ -786,16 +810,25 @@ test('tenant user can filter and paginate bookings', function () {
         'promo_code' => null,
         'check_in' => '2026-06-05',
         'check_out' => '2026-06-07',
+        'status' => BookingStatus::Confirmed->value,
     ])->assertCreated();
 
     $firstBookingId = $firstBookingResponse->json('data.id');
     $secondBookingId = $secondBookingResponse->json('data.id');
+    $firstBookingNumber = $firstBookingResponse->json('data.booking_number');
 
-    getJson("/api/tenants/hotel-alpha/bookings?filter[booking_number]={$firstBookingId}")
+    getJson("/api/tenants/hotel-alpha/bookings?filter[booking_number]={$firstBookingNumber}")
         ->assertSuccessful()
         ->assertJsonCount(1, 'data.data')
         ->assertJsonPath('data.data.0.id', $firstBookingId)
+        ->assertJsonPath('data.data.0.booking_number', $firstBookingNumber)
         ->assertJsonPath('data.total', 1);
+
+    getJson('/api/tenants/hotel-alpha/bookings?filter[status]=confirmed')
+        ->assertSuccessful()
+        ->assertJsonCount(1, 'data.data')
+        ->assertJsonPath('data.data.0.id', $secondBookingId)
+        ->assertJsonPath('data.data.0.status', BookingStatus::Confirmed->value);
 
     getJson('/api/tenants/hotel-alpha/bookings?filter[customer_name]=Guest Two')
         ->assertSuccessful()
@@ -822,6 +855,92 @@ test('tenant user can filter and paginate bookings', function () {
         ->assertJsonPath('data.current_page', 1)
         ->assertJsonPath('data.per_page', 1)
         ->assertJsonPath('data.total', 2);
+});
+
+test('tenant user can add a booking down payment and download invoice and receipt', function () {
+    $tenant = Tenant::withoutEvents(fn (): Tenant => Tenant::query()->create([
+        'id' => 'hotel-alpha',
+        'name' => 'Hotel Alpha',
+    ]));
+
+    $user = User::factory()->create([
+        'tenant_id' => $tenant->getKey(),
+        'email' => 'admin@example.com',
+    ]);
+    $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
+
+    tenancy()->initialize($tenant);
+
+    try {
+        $room = Room::factory()->create([
+            'tenant_id' => 'hotel-alpha',
+            'room_name' => 'Business Twin Room',
+            'rate' => '625.25',
+        ]);
+    } finally {
+        tenancy()->end();
+    }
+
+    Sanctum::actingAs($user);
+
+    $bookingResponse = postJson('/api/tenants/hotel-alpha/bookings', [
+        'guest_name' => 'Guest One',
+        'guest_email' => 'guest@example.com',
+        'guest_phone' => '01700000000',
+        'room_id' => $room->id,
+        'assigned_room_number' => '301',
+        'room_quantity' => 1,
+        'discount' => 0,
+        'check_in' => '2026-06-01',
+        'check_out' => '2026-06-03',
+    ])->assertCreated();
+
+    $bookingId = $bookingResponse->json('data.id');
+
+    Carbon::setTestNow('2026-06-10 14:35:20');
+
+    try {
+        $downPaymentResponse = postJson("/api/tenants/hotel-alpha/bookings/{$bookingId}/down-payment", [
+            'amount' => '500.00',
+            'method' => 'cash',
+            'reference' => 'REF-001',
+            'paid_at' => '2026-06-10',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.invoice.status', 'partial')
+            ->assertJsonPath('data.invoice.amount_paid', '500.00')
+            ->assertJsonPath('data.invoice.amount_due', '750.50')
+            ->assertJsonPath('data.invoice.payments.0.amount', '500.00')
+            ->assertJsonPath('data.invoice.payments.0.method', 'cash')
+            ->assertJsonPath('data.invoice.payments.0.paid_at', '2026-06-10 14:35:20')
+            ->assertJsonPath('data.invoice.payments.0.receipt.receipt_number', 'RCP-000001');
+    } finally {
+        Carbon::setTestNow();
+    }
+
+    expect($downPaymentResponse->json('data.invoice.download_url'))
+        ->toBe($downPaymentResponse->json('data.invoice.payments.0.receipt.download_url'));
+
+    Pdf::fake();
+
+    get($downPaymentResponse->json('data.invoice.download_url'))
+        ->assertSuccessful();
+
+    Pdf::assertRespondedWithPdf(function (PdfBuilder $pdf): bool {
+        return $pdf->downloadName === 'RCP-000001.pdf'
+            && $pdf->isDownload()
+            && $pdf->contains(['Receipt Number:', 'RCP-000001', 'Method:', 'cash']);
+    });
+
+    get($downPaymentResponse->json('data.invoice.payments.0.receipt.download_url'))
+        ->assertSuccessful();
+
+    Pdf::assertRespondedWithPdf(function (PdfBuilder $pdf): bool {
+        return $pdf->downloadName === 'RCP-000001.pdf'
+            && $pdf->isDownload()
+            && $pdf->contains(['Receipt Number:', 'RCP-000001', 'Method:', 'cash']);
+    });
 });
 
 test('tenant management requires super admin role', function () {

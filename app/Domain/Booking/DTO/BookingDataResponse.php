@@ -2,6 +2,7 @@
 
 namespace App\Domain\Booking\DTO;
 
+use App\Enums\BookingStatus;
 use App\Models\Booking;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Storage;
@@ -13,6 +14,7 @@ class BookingDataResponse extends Data
 {
     public function __construct(
         public readonly int $id,
+        public readonly ?string $booking_number,
         public readonly ?string $tenant_id,
         public readonly int $user_id,
         public readonly ?int $room_id,
@@ -29,6 +31,7 @@ class BookingDataResponse extends Data
         public readonly ?string $promo_code,
         public readonly string $check_in,
         public readonly string $check_out,
+        public readonly string $status,
         public readonly ?BookingInvoiceDataResponse $invoice = null,
     ) {}
 
@@ -46,6 +49,7 @@ class BookingDataResponse extends Data
 
         return new self(
             id: $booking->id,
+            booking_number: $booking->booking_number,
             tenant_id: $booking->tenant_id !== null ? (string) $booking->tenant_id : null,
             user_id: $booking->user_id,
             room_id: $booking->room_id,
@@ -62,6 +66,7 @@ class BookingDataResponse extends Data
             promo_code: $booking->promo_code,
             check_in: $booking->check_in->toDateString(),
             check_out: $booking->check_out->toDateString(),
+            status: $booking->status?->value ?? BookingStatus::Pending->value,
             invoice: $booking->invoice
                 ? BookingInvoiceDataResponse::fromInvoice($booking->invoice)
                 : null,

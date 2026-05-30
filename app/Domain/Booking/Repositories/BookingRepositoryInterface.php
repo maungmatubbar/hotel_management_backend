@@ -22,7 +22,8 @@ interface BookingRepositoryInterface
      *     discount: mixed,
      *     promo_code: ?string,
      *     check_in: mixed,
-     *     check_out: mixed
+     *     check_out: mixed,
+     *     status: string
      * }  $attributes
      */
     public function create(array $attributes): Booking;

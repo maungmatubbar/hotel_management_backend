@@ -20,6 +20,9 @@ services:
       DB_HOST: mysql
       DB_PORT: "3306"
       REDIS_HOST: redis
+      LARAVEL_PDF_DRIVER: chrome
+      LARAVEL_PDF_CHROME_BINARY: /usr/bin/chromium
+      LARAVEL_PDF_CHROME_NO_SANDBOX: "true"
     networks:
       - hotel_management
 

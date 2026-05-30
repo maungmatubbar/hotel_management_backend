@@ -4,9 +4,13 @@ use App\Application\Booking\CreateBookingUseCase;
 use App\Domain\Billing\Action\CreateBookingDownPaymentAction;
 use App\Domain\Billing\Action\CreateInvoiceForBookingAction;
 use App\Domain\Billing\Action\CreateReceiptForPaymentAction;
+use App\Domain\Billing\Action\GenerateInvoiceDownloadAction;
+use App\Domain\Billing\Action\GenerateReceiptDownloadAction;
 use App\Domain\Booking\Action\CreateBookingAction;
+use App\Domain\Booking\Action\UpdateBookingStatusAction;
 use App\Domain\Booking\DTO\BookingDataRequest;
 use App\Domain\Booking\DTO\BookingDataResponse;
+use App\Enums\BookingStatus;
 use App\Models\Booking;
 use App\Models\File;
 use App\Models\Invoice;
@@ -18,7 +22,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
-use Spatie\Permission\Models\Role;
+use Spatie\LaravelPdf\PdfBuilder;
 use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
@@ -35,6 +39,7 @@ function migrateTenantBookingSchema(): void
     Schema::dropIfExists('bookings');
 
     (require database_path('migrations/2026_05_29_134947_create_bookings_table.php'))->up();
+    (require database_path('migrations/2026_05_30_100654_add_booking_number_and_status_to_bookings_table.php'))->up();
     (require database_path('migrations/2026_05_29_142311_create_invoices_table.php'))->up();
     (require database_path('migrations/2026_05_29_142312_create_payments_table.php'))->up();
     (require database_path('migrations/2026_05_29_142313_create_receipts_table.php'))->up();
@@ -58,6 +63,7 @@ function bookingDataRequest(array $overrides = []): BookingDataRequest
         promo_code: $overrides['promo_code'] ?? null,
         check_in: $overrides['check_in'] ?? '2026-06-01',
         check_out: $overrides['check_out'] ?? '2026-06-03',
+        status: $overrides['status'] ?? null,
         down_payment_amount: $overrides['down_payment_amount'] ?? null,
         payment_method: $overrides['payment_method'] ?? null,
         payment_reference: $overrides['payment_reference'] ?? null,
@@ -95,6 +101,7 @@ function createTenantBooking(): Booking
         'discount' => '0',
         'check_in' => '2026-06-01',
         'check_out' => '2026-06-03',
+        'status' => BookingStatus::Pending,
     ]);
 }
 
@@ -118,12 +125,10 @@ test('create booking down payment action records payment and updates invoice', f
     $invoice = (new CreateInvoiceForBookingAction)($booking);
 
     $payment = (new CreateBookingDownPaymentAction)(
-        $invoice->fresh(),
-        bookingDataRequest([
-            'down_payment_amount' => '500.00',
-            'payment_method' => 'cash',
-            'payment_reference' => 'REF-001',
-        ]),
+        invoice: $invoice->fresh(),
+        amount: '500.00',
+        method: 'cash',
+        reference: 'REF-001',
     );
 
     $invoice->refresh();
@@ -141,11 +146,9 @@ test('create receipt for payment action creates a receipt', function () {
     $booking = createTenantBooking();
     $invoice = (new CreateInvoiceForBookingAction)($booking);
     $payment = (new CreateBookingDownPaymentAction)(
-        $invoice->fresh(),
-        bookingDataRequest([
-            'down_payment_amount' => '500.00',
-            'payment_method' => 'cash',
-        ]),
+        invoice: $invoice->fresh(),
+        amount: '500.00',
+        method: 'cash',
     );
 
     $receipt = (new CreateReceiptForPaymentAction)($payment);
@@ -192,12 +195,14 @@ test('create booking use case creates booking and invoice without down payment',
     ]));
 
     $booking = app(CreateBookingUseCase::class)($tenant, bookingDataRequest());
+    $response = BookingDataResponse::fromBooking($booking);
 
     expect($booking->invoice)->not->toBeNull()
         ->and($booking->invoice->status)->toBe(Invoice::STATUS_ISSUED)
         ->and($booking->invoice->amount_paid)->toBe('0.00')
         ->and(Payment::query()->exists())->toBeFalse()
-        ->and(Receipt::query()->exists())->toBeFalse();
+        ->and(Receipt::query()->exists())->toBeFalse()
+        ->and($response->invoice->download_url)->toContain('/invoice/download');
 
     $guest = User::query()->where('email', 'guest@example.com')->firstOrFail();
 
@@ -239,6 +244,8 @@ test('create booking use case creates invoice payment and receipt for down payme
     ]));
 
     expect($booking->invoice)->not->toBeNull()
+        ->and($booking->booking_number)->toBe(Booking::numberForId($booking->id))
+        ->and($booking->status)->toBe(BookingStatus::Pending)
         ->and($booking->invoice->status)->toBe(Invoice::STATUS_PARTIAL)
         ->and($booking->invoice->amount_paid)->toBe('500.00')
         ->and($booking->invoice->payments)->toHaveCount(1)
@@ -261,13 +268,51 @@ test('booking response includes invoice payments and receipts', function () {
     $response = BookingDataResponse::fromBooking($booking);
 
     expect($response->invoice)->not->toBeNull()
+        ->and($response->booking_number)->toBe(Booking::numberForId($booking->id))
+        ->and($response->status)->toBe(BookingStatus::Pending->value)
         ->and($response->invoice->invoice_number)->toBe('INV-000001')
+        ->and($response->invoice->download_url)->toContain('/receipts/1/download')
         ->and($response->invoice->payments)->toHaveCount(1)
         ->and($response->invoice->payments[0]->amount)->toBe('500.00')
         ->and($response->invoice->payments[0]->method)->toBe('cash')
         ->and($response->invoice->payments[0]->reference)->toBe('REF-001')
         ->and($response->invoice->payments[0]->receipt)->not->toBeNull()
-        ->and($response->invoice->payments[0]->receipt->receipt_number)->toBe('RCP-000001');
+        ->and($response->invoice->payments[0]->receipt->receipt_number)->toBe('RCP-000001')
+        ->and($response->invoice->payments[0]->receipt->download_url)->toContain('/receipts/1/download');
+});
+
+test('invoice and receipt download actions render booking billing documents', function () {
+    $tenant = Tenant::withoutEvents(fn (): Tenant => Tenant::query()->create([
+        'id' => 'hotel-alpha',
+        'name' => 'Hotel Alpha',
+    ]));
+
+    $booking = app(CreateBookingUseCase::class)($tenant, bookingDataRequest([
+        'down_payment_amount' => '500.00',
+        'payment_method' => 'cash',
+        'payment_reference' => 'REF-001',
+    ]));
+
+    $invoicePdf = app(GenerateInvoiceDownloadAction::class)($booking->invoice);
+    $receiptPdf = app(GenerateReceiptDownloadAction::class)($booking->invoice->payments->first()->receipt);
+
+    expect($invoicePdf)->toBeInstanceOf(PdfBuilder::class)
+        ->and($invoicePdf->downloadName)->toBe('INV-000001.pdf')
+        ->and($invoicePdf->isDownload())->toBeTrue()
+        ->and($invoicePdf->contains(['Invoice Number:', 'INV-000001', 'Amount Paid', '500.00']))->toBeTrue()
+        ->and($receiptPdf)->toBeInstanceOf(PdfBuilder::class)
+        ->and($receiptPdf->downloadName)->toBe('RCP-000001.pdf')
+        ->and($receiptPdf->isDownload())->toBeTrue()
+        ->and($receiptPdf->contains(['Receipt Number:', 'RCP-000001', 'Method:', 'cash']))->toBeTrue();
+});
+
+test('update booking status action updates the booking enum status', function () {
+    $booking = createTenantBooking();
+
+    $updatedBooking = (new UpdateBookingStatusAction)($booking, BookingStatus::Confirmed);
+
+    expect($updatedBooking->status)->toBe(BookingStatus::Confirmed)
+        ->and($booking->fresh()->status)->toBe(BookingStatus::Confirmed);
 });
 
 test('store booking request validates booking payload shape', function () {

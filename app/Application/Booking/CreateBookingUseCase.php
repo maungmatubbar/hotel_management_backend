@@ -27,7 +27,13 @@ class CreateBookingUseCase
             $invoice = app(CreateInvoiceForBookingAction::class)($booking);
 
             if ($data->hasDownPayment()) {
-                $payment = app(CreateBookingDownPaymentAction::class)($invoice, $data);
+                $payment = app(CreateBookingDownPaymentAction::class)(
+                    invoice: $invoice,
+                    amount: (string) $data->down_payment_amount,
+                    method: (string) $data->payment_method,
+                    reference: $data->payment_reference,
+                    paidAt: $data->paid_at,
+                );
                 app(CreateReceiptForPaymentAction::class)($payment);
             }
 

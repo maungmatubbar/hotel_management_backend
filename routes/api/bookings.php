@@ -14,6 +14,18 @@ Route::prefix('tenants/{tenant}')
         Route::post('bookings', [BookingController::class, 'store'])
             ->name('bookings.store');
 
+        Route::post('bookings/{booking}/payments', [BookingController::class, 'storeDownPayment'])
+            ->name('bookings.down-payment.store');
+
+        Route::get('bookings/{booking}/invoice/download', [BookingController::class, 'downloadInvoice'])
+            ->name('bookings.invoice.download');
+
+        Route::get('bookings/{booking}/receipts/{receipt}/download', [BookingController::class, 'downloadReceipt'])
+            ->name('bookings.receipts.download');
+
+        Route::patch('bookings/{booking}/status', [BookingController::class, 'updateStatus'])
+            ->name('bookings.status.update');
+
         Route::get('bookings/{booking}', [BookingController::class, 'show'])
             ->name('bookings.show');
     });

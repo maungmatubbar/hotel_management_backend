@@ -5,6 +5,7 @@ namespace App\Domain\Booking\Action;
 use App\Domain\Booking\DTO\BookingDataRequest;
 use App\Domain\Booking\Repositories\BookingRepositoryInterface;
 use App\Domain\Room\Repositories\RoomRepositoryInterface;
+use App\Enums\BookingStatus;
 use App\Models\Booking;
 use App\Models\Tenant;
 use App\Models\User;
@@ -44,6 +45,11 @@ class CreateBookingAction
             'promo_code' => $data->promo_code,
             'check_in' => $data->check_in,
             'check_out' => $data->check_out,
+            'status' => $data->status ?? BookingStatus::Pending->value,
+        ]);
+
+        $booking->update([
+            'booking_number' => Booking::numberForId($booking->id),
         ]);
 
         ($this->storeBookingNidImage)($booking, $tenant, $data);

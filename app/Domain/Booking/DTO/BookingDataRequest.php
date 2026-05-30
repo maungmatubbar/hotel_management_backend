@@ -2,6 +2,8 @@
 
 namespace App\Domain\Booking\DTO;
 
+use App\Enums\BookingStatus;
+use Illuminate\Validation\Rule;
 use Spatie\LaravelData\Data;
 
 class BookingDataRequest extends Data
@@ -21,6 +23,7 @@ class BookingDataRequest extends Data
         public readonly string $check_in,
         public readonly string $check_out,
         public readonly ?string $room = null,
+        public readonly ?string $status = null,
         public readonly ?string $down_payment_amount = null,
         public readonly ?string $payment_method = null,
         public readonly ?string $payment_reference = null,
@@ -34,7 +37,7 @@ class BookingDataRequest extends Data
     }
 
     /**
-     * @return array<string, array<int, string>>
+     * @return array<string, array<int, mixed>>
      */
     public static function rules(): array
     {
@@ -53,6 +56,7 @@ class BookingDataRequest extends Data
             'promo_code' => ['nullable', 'string', 'max:255'],
             'check_in' => ['required', 'date'],
             'check_out' => ['required', 'date', 'after_or_equal:check_in'],
+            'status' => ['sometimes', 'string', Rule::enum(BookingStatus::class)],
             'down_payment_amount' => ['nullable', 'numeric', 'min:0'],
             'payment_method' => ['nullable', 'string', 'max:50'],
             'payment_reference' => ['nullable', 'string', 'max:255'],

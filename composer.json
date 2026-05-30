@@ -10,6 +10,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
+        "chrome-php/chrome": "^1.15",
         "laravel/framework": "^13.8",
         "laravel/horizon": "^5.47",
         "laravel/sanctum": "^4.3",
@@ -19,6 +20,7 @@
         "spatie/laravel-activitylog": "^4.12",
         "spatie/laravel-data": "^4.23",
         "spatie/laravel-medialibrary": "^11.22",
+        "spatie/laravel-pdf": "^2.11",
         "spatie/laravel-permission": "^7.4",
         "spatie/laravel-query-builder": "^7.3",
         "spatie/laravel-typescript-transformer": "^3.2",

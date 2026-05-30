@@ -26,7 +26,14 @@ class GetBookingsUseCase
                     $bookingNumber = $this->filterValue($value);
 
                     if ($bookingNumber !== '') {
-                        $query->whereKey((int) $bookingNumber);
+                        $query->where('booking_number', $bookingNumber);
+                    }
+                }),
+                AllowedFilter::callback('status', function (Builder $query, mixed $value): void {
+                    $status = $this->filterValue($value);
+
+                    if ($status !== '') {
+                        $query->where('status', $status);
                     }
                 }),
                 AllowedFilter::callback('customer_name', function (Builder $query, mixed $value): void {

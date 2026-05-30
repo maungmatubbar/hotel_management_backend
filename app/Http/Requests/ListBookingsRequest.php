@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\BookingStatus;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ListBookingsRequest extends FormRequest
 {
@@ -17,13 +19,14 @@ class ListBookingsRequest extends FormRequest
     /**
      * Get the validation rules that apply to the request.
      *
-     * @return array<string, array<int, string>>
+     * @return array<string, array<int, mixed>>
      */
     public function rules(): array
     {
         return [
             'filter' => ['sometimes', 'array'],
-            'filter.booking_number' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'filter.booking_number' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'filter.status' => ['sometimes', 'nullable', 'string', Rule::enum(BookingStatus::class)],
             'filter.customer_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'filter.customer_email' => ['sometimes', 'nullable', 'string', 'max:255'],
             'filter.customer_phone_number' => ['sometimes', 'nullable', 'string', 'max:255'],
