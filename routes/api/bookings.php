@@ -11,6 +11,12 @@ Route::prefix('tenants/{tenant}')
     ->group(function (): void {
         Route::post('public-bookings', [BookingController::class, 'publicStore'])
             ->name('bookings.public.store');
+
+        Route::get('bookings/{booking}/invoice/download', [BookingController::class, 'downloadInvoice'])
+            ->name('bookings.invoice.download');
+
+        Route::get('bookings/{booking}/receipts/{receipt}/download', [BookingController::class, 'downloadReceipt'])
+            ->name('bookings.receipts.download');
     });
 
 Route::prefix('tenants/{tenant}')
@@ -28,12 +34,6 @@ Route::prefix('tenants/{tenant}')
 
         Route::post('bookings/{booking}/down-payment', [BookingController::class, 'storeDownPayment'])
             ->name('bookings.down-payment.alias.store');
-
-        Route::get('bookings/{booking}/invoice/download', [BookingController::class, 'downloadInvoice'])
-            ->name('bookings.invoice.download');
-
-        Route::get('bookings/{booking}/receipts/{receipt}/download', [BookingController::class, 'downloadReceipt'])
-            ->name('bookings.receipts.download');
 
         Route::patch('bookings/{booking}/status', [BookingController::class, 'updateStatus'])
             ->name('bookings.status.update');

@@ -594,13 +594,26 @@ test('public user gets sslcommerz redirect data for pay now booking', function (
     get("/api/tenants/hotel-alpha/public/invoices/by-number/{$invoiceNumber}/sslcommerz/cancel")
         ->assertRedirect("http://localhost:3000/payment/{$invoiceNumber}/cancel");
 
-    getJson("/api/tenants/hotel-alpha/public/invoices/{$invoiceNumber}")
+    $publicInvoiceResponse = getJson("/api/tenants/hotel-alpha/public/invoices/{$invoiceNumber}")
         ->assertSuccessful()
         ->assertJsonPath('data.status', 'paid')
         ->assertJsonPath('data.payments.0.amount', '625.25')
         ->assertJsonPath('data.payments.0.method', 'VISA')
         ->assertJsonPath('data.payments.0.reference', 'BKG-000001-TEST')
         ->assertJsonPath('data.payments.0.receipt.receipt_number', 'RCP-000001');
+
+    expect(parse_url($publicInvoiceResponse->json('data.download_url'), PHP_URL_PATH))
+        ->toBe("/api/tenants/hotel-alpha/bookings/{$response->json('data.booking.id')}/invoice/download")
+        ->and(parse_url($publicInvoiceResponse->json('data.payments.0.receipt.download_url'), PHP_URL_PATH))
+        ->toBe("/api/tenants/hotel-alpha/bookings/{$response->json('data.booking.id')}/receipts/{$publicInvoiceResponse->json('data.payments.0.receipt.id')}/download");
+
+    Pdf::fake();
+
+    get($publicInvoiceResponse->json('data.download_url'))
+        ->assertSuccessful();
+
+    get($publicInvoiceResponse->json('data.payments.0.receipt.download_url'))
+        ->assertSuccessful();
 
     getJson("/api/tenants/hotel-alpha/public/invoices/by-number/{$invoiceNumber}")
         ->assertSuccessful()
