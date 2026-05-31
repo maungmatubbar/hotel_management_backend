@@ -2,7 +2,16 @@
 
 use App\Http\Controllers\Tenant\BookingController;
 use App\Http\Middleware\InitializeTenantByRouteParameter;
+use App\Http\Middleware\InitializeTenantForPublicRoute;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('tenants/{tenant}')
+    ->middleware(InitializeTenantForPublicRoute::class)
+    ->name('tenants.')
+    ->group(function (): void {
+        Route::post('public-bookings', [BookingController::class, 'publicStore'])
+            ->name('bookings.public.store');
+    });
 
 Route::prefix('tenants/{tenant}')
     ->middleware(['auth:sanctum', InitializeTenantByRouteParameter::class])
@@ -16,6 +25,9 @@ Route::prefix('tenants/{tenant}')
 
         Route::post('bookings/{booking}/payments', [BookingController::class, 'storeDownPayment'])
             ->name('bookings.down-payment.store');
+
+        Route::post('bookings/{booking}/down-payment', [BookingController::class, 'storeDownPayment'])
+            ->name('bookings.down-payment.alias.store');
 
         Route::get('bookings/{booking}/invoice/download', [BookingController::class, 'downloadInvoice'])
             ->name('bookings.invoice.download');

@@ -8,6 +8,8 @@ use App\Domain\Billing\Action\CreateBookingDownPaymentAction;
 use App\Domain\Billing\Action\CreateReceiptForPaymentAction;
 use App\Domain\Billing\Action\GenerateInvoiceDownloadAction;
 use App\Domain\Billing\Action\GenerateReceiptDownloadAction;
+use App\Domain\Billing\Contracts\BookingPaymentGateway;
+use App\Domain\Billing\DTO\BookingPaymentRedirectData;
 use App\Domain\Booking\Action\UpdateBookingStatusAction;
 use App\Domain\Booking\DTO\BookingDataRequest;
 use App\Domain\Booking\DTO\BookingDataResponse;
@@ -16,6 +18,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\ListBookingsRequest;
 use App\Http\Requests\StoreBookingDownPaymentRequest;
 use App\Http\Requests\StoreBookingRequest;
+use App\Http\Requests\StorePublicBookingRequest;
 use App\Http\Requests\UpdateBookingStatusRequest;
 use App\Models\Booking;
 use App\Models\Receipt;
@@ -38,6 +41,31 @@ class BookingController extends Controller
     {
         return $this->successResponse(
             data: BookingDataResponse::fromBooking($createBookingUseCase($tenant, BookingDataRequest::from($request->validated()))),
+            status: Response::HTTP_CREATED,
+        );
+    }
+
+    public function publicStore(
+        StorePublicBookingRequest $request,
+        Tenant $tenant,
+        CreateBookingUseCase $createBookingUseCase,
+        BookingPaymentGateway $bookingPaymentGateway,
+    ): JsonResponse {
+        $booking = $createBookingUseCase($tenant, $request->toBookingDataRequest());
+        $paymentRedirect = $request->isPayNow()
+            ? $bookingPaymentGateway->redirectForBooking($booking)
+            : null;
+
+        return $this->successResponse(
+            data: [
+                'booking' => BookingDataResponse::fromBooking($booking),
+                'payment' => $paymentRedirect instanceof BookingPaymentRedirectData
+                    ? [
+                        'payment_url' => $paymentRedirect->payment_url,
+                        'transaction_id' => $paymentRedirect->transaction_id,
+                    ]
+                    : null,
+            ],
             status: Response::HTTP_CREATED,
         );
     }

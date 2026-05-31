@@ -11,6 +11,7 @@ return Application::configure(basePath: dirname(__DIR__))
             __DIR__.'/../routes/api/auth.php',
             __DIR__.'/../routes/api/tenants.php',
             __DIR__.'/../routes/api/bookings.php',
+            __DIR__.'/../routes/api/invoice.php',
             __DIR__.'/../routes/api/rooms.php',
             __DIR__.'/../routes/api/files.php',
         ],

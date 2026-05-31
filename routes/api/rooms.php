@@ -2,15 +2,21 @@
 
 use App\Http\Controllers\Tenant\RoomController;
 use App\Http\Middleware\InitializeTenantByRouteParameter;
+use App\Http\Middleware\InitializeTenantForPublicRoute;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('tenants/{tenant}')
+    ->middleware(InitializeTenantForPublicRoute::class)
+    ->name('tenants.')
+    ->group(function (): void {
+        Route::get('rooms', [RoomController::class, 'index'])
+            ->name('rooms.index');
+    });
 
 Route::prefix('tenants/{tenant}')
     ->middleware(['auth:sanctum', InitializeTenantByRouteParameter::class])
     ->name('tenants.')
     ->group(function (): void {
-        Route::get('rooms', [RoomController::class, 'index'])
-            ->name('rooms.index');
-
         Route::post('rooms', [RoomController::class, 'store'])
             ->name('rooms.store');
 

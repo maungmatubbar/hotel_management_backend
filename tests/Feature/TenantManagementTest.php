@@ -1,5 +1,7 @@
 <?php
 
+use App\Domain\Billing\Contracts\BookingPaymentGateway;
+use App\Domain\Billing\DTO\BookingPaymentRedirectData;
 use App\Enums\BookingStatus;
 use App\Models\Booking;
 use App\Models\File as FileRecord;
@@ -383,17 +385,11 @@ test('tenant user can create a room with multiple images', function () {
     ]);
 });
 
-test('tenant user can get rooms', function () {
-    $tenant = Tenant::query()->create([
+test('public user can get rooms', function () {
+    $tenant = Tenant::withoutEvents(fn (): Tenant => Tenant::query()->create([
         'id' => 'hotel-alpha',
         'name' => 'Hotel Alpha',
-    ]);
-
-    $user = User::factory()->create([
-        'tenant_id' => $tenant->getKey(),
-        'email' => 'admin@example.com',
-    ]);
-    $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
+    ]));
 
     tenancy()->initialize($tenant);
 
@@ -421,8 +417,6 @@ test('tenant user can get rooms', function () {
         tenancy()->end();
     }
 
-    Sanctum::actingAs($user);
-
     getJson('/api/tenants/hotel-alpha/rooms')
         ->assertSuccessful()
         ->assertJsonPath('success', true)
@@ -436,6 +430,181 @@ test('tenant user can get rooms', function () {
         ->assertJsonPath('data.0.amenities.0', 'wifi')
         ->assertJsonPath('data.0.images.0', 'rooms/suite.jpg')
         ->assertJsonPath('data.0.description', 'Suite with balcony.');
+});
+
+test('public user can create a pay later booking', function () {
+    $tenant = Tenant::withoutEvents(fn (): Tenant => Tenant::query()->create([
+        'id' => 'hotel-alpha',
+        'name' => 'Hotel Alpha',
+    ]));
+
+    tenancy()->initialize($tenant);
+
+    try {
+        $room = Room::factory()->create([
+            'tenant_id' => 'hotel-alpha',
+            'room_name' => 'Business Twin Room',
+            'rate' => '625.25',
+        ]);
+    } finally {
+        tenancy()->end();
+    }
+
+    $response = postJson('/api/tenants/hotel-alpha/public-bookings', [
+        'customer_name' => 'Louis Roman',
+        'phone_number' => '+1 (322) 772-6369',
+        'email' => 'judolyky@mailinator.com',
+        'address' => 'Cum dicta ullamco po',
+        'payment_option' => 'pay_later',
+        'check_in' => '2026-05-31',
+        'check_out' => '2026-06-01',
+        'guests' => '4',
+        'room_id' => (string) $room->id,
+        'room_quantity' => 1,
+        'stay_nights' => 1,
+    ])
+        ->assertCreated()
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.booking.tenant_id', 'hotel-alpha')
+        ->assertJsonPath('data.booking.room_id', $room->id)
+        ->assertJsonPath('data.booking.guest_name', 'Louis Roman')
+        ->assertJsonPath('data.booking.guest_email', 'judolyky@mailinator.com')
+        ->assertJsonPath('data.booking.guest_phone', '+1 (322) 772-6369')
+        ->assertJsonPath('data.booking.assigned_room_number', 'To be assigned')
+        ->assertJsonPath('data.booking.invoice.status', 'issued')
+        ->assertJsonPath('data.payment', null);
+
+    expect($response->json('data.booking.invoice.total_amount'))->toBe('625.25');
+
+    getJson("/api/tenants/hotel-alpha/public/invoices/{$response->json('data.booking.invoice.id')}")
+        ->assertSuccessful()
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.invoice_number', $response->json('data.booking.invoice.invoice_number'))
+        ->assertJsonPath('data.total_amount', '625.25')
+        ->assertJsonPath('data.amount_due', '625.25')
+        ->assertJsonPath('data.status', 'issued');
+});
+
+test('public user gets sslcommerz redirect data for pay now booking', function () {
+    $tenant = Tenant::withoutEvents(fn (): Tenant => Tenant::query()->create([
+        'id' => 'hotel-alpha',
+        'name' => 'Hotel Alpha',
+    ]));
+
+    tenancy()->initialize($tenant);
+
+    try {
+        $room = Room::factory()->create([
+            'tenant_id' => 'hotel-alpha',
+            'room_name' => 'Business Twin Room',
+            'rate' => '625.25',
+        ]);
+    } finally {
+        tenancy()->end();
+    }
+
+    $gateway = new class implements BookingPaymentGateway
+    {
+        public ?Booking $booking = null;
+
+        public function redirectForBooking(Booking $booking): BookingPaymentRedirectData
+        {
+            $this->booking = $booking;
+
+            return new BookingPaymentRedirectData(
+                payment_url: 'https://sandbox.sslcommerz.com/pay/test-session',
+                transaction_id: 'BKG-000001-TEST',
+            );
+        }
+    };
+
+    app()->instance(BookingPaymentGateway::class, $gateway);
+
+    $response = postJson('/api/tenants/hotel-alpha/public-bookings', [
+        'customer_name' => 'Louis Roman',
+        'phone_number' => '+1 (322) 772-6369',
+        'email' => 'judolyky@mailinator.com',
+        'address' => 'Cum dicta ullamco po',
+        'payment_option' => 'pay_now',
+        'check_in' => '2026-05-31',
+        'check_out' => '2026-06-01',
+        'guests' => '4',
+        'room_id' => (string) $room->id,
+        'room_quantity' => 1,
+        'stay_nights' => 1,
+    ])
+        ->assertCreated()
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.booking.guest_name', 'Louis Roman')
+        ->assertJsonPath('data.payment.payment_url', 'https://sandbox.sslcommerz.com/pay/test-session')
+        ->assertJsonPath('data.payment.transaction_id', 'BKG-000001-TEST');
+
+    expect($gateway->booking)->toBeInstanceOf(Booking::class)
+        ->and($gateway->booking?->invoice?->amount_due)->toBe('625.25')
+        ->and($response->json('data.booking.invoice.amount_due'))->toBe('625.25');
+
+    $invoiceNumber = $response->json('data.booking.invoice.invoice_number');
+    config()->set('services.sslcommerz.success_url', 'http://localhost:3000/payment/{invoice_number}/success');
+    config()->set('services.sslcommerz.fail_url', 'http://localhost:3000/payment/{invoice_number}/fail');
+    config()->set('services.sslcommerz.cancel_url', 'http://localhost:3000/payment/{invoice_number}/cancel');
+
+    getJson("/api/tenants/hotel-alpha/public/invoices/by-number/{$invoiceNumber}/sslcommerz/success?".http_build_query([
+        'tran_id' => 'BKG-000001-TEST',
+        'amount' => '625.25',
+        'status' => 'VALID',
+        'card_type' => 'VISA',
+        'tran_date' => '2026-05-31 10:30:00',
+    ]), [
+        'Accept' => 'application/json',
+    ])
+        ->assertSuccessful()
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.status', 'paid')
+        ->assertJsonPath('data.amount_paid', '625.25')
+        ->assertJsonPath('data.amount_due', '0.00')
+        ->assertJsonPath('data.payments.0.amount', '625.25')
+        ->assertJsonPath('data.payments.0.method', 'VISA')
+        ->assertJsonPath('data.payments.0.reference', 'BKG-000001-TEST')
+        ->assertJsonPath('data.payments.0.receipt.receipt_number', 'RCP-000001');
+
+    getJson("/api/tenants/hotel-alpha/public/invoices/by-number/{$invoiceNumber}/sslcommerz/success?".http_build_query([
+        'tran_id' => 'BKG-000001-TEST',
+        'amount' => '625.25',
+        'status' => 'VALID',
+        'card_type' => 'VISA',
+    ]), [
+        'Accept' => 'application/json',
+    ])
+        ->assertSuccessful()
+        ->assertJsonCount(1, 'data.payments')
+        ->assertJsonPath('data.status', 'paid')
+        ->assertJsonPath('data.amount_paid', '625.25');
+
+    get("/api/tenants/hotel-alpha/public/invoices/by-number/{$invoiceNumber}/sslcommerz/success?".http_build_query([
+        'tran_id' => 'BKG-000001-TEST',
+        'amount' => '625.25',
+        'status' => 'VALID',
+        'card_type' => 'VISA',
+    ]))
+        ->assertRedirect("http://localhost:3000/payment/{$invoiceNumber}/success");
+
+    get("/api/tenants/hotel-alpha/public/invoices/by-number/{$invoiceNumber}/sslcommerz/fail")
+        ->assertRedirect("http://localhost:3000/payment/{$invoiceNumber}/fail");
+
+    get("/api/tenants/hotel-alpha/public/invoices/by-number/{$invoiceNumber}/sslcommerz/cancel")
+        ->assertRedirect("http://localhost:3000/payment/{$invoiceNumber}/cancel");
+
+    getJson("/api/tenants/hotel-alpha/public/invoices/{$invoiceNumber}")
+        ->assertSuccessful()
+        ->assertJsonPath('data.status', 'paid')
+        ->assertJsonPath('data.payments.0.amount', '625.25')
+        ->assertJsonPath('data.payments.0.method', 'VISA')
+        ->assertJsonPath('data.payments.0.reference', 'BKG-000001-TEST')
+        ->assertJsonPath('data.payments.0.receipt.receipt_number', 'RCP-000001');
+
+    getJson("/api/tenants/hotel-alpha/public/invoices/by-number/{$invoiceNumber}")
+        ->assertSuccessful()
+        ->assertJsonPath('data.status', 'paid');
 });
 
 test('tenant user can get a room for editing', function () {
