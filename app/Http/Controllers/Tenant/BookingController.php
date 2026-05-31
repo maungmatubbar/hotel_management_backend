@@ -10,15 +10,19 @@ use App\Domain\Billing\Action\GenerateInvoiceDownloadAction;
 use App\Domain\Billing\Action\GenerateReceiptDownloadAction;
 use App\Domain\Billing\Contracts\BookingPaymentGateway;
 use App\Domain\Billing\DTO\BookingPaymentRedirectData;
+use App\Domain\Booking\Action\AssignBookingRoomAction;
+use App\Domain\Booking\Action\UpdateBookingNidImageAction;
 use App\Domain\Booking\Action\UpdateBookingStatusAction;
 use App\Domain\Booking\DTO\BookingDataRequest;
 use App\Domain\Booking\DTO\BookingDataResponse;
 use App\Enums\BookingStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\AssignBookingRoomRequest;
 use App\Http\Requests\ListBookingsRequest;
 use App\Http\Requests\StoreBookingDownPaymentRequest;
 use App\Http\Requests\StoreBookingRequest;
 use App\Http\Requests\StorePublicBookingRequest;
+use App\Http\Requests\UpdateBookingNidImageRequest;
 use App\Http\Requests\UpdateBookingStatusRequest;
 use App\Models\Booking;
 use App\Models\Receipt;
@@ -136,6 +140,41 @@ class BookingController extends Controller
                 $updateBookingStatusAction(
                     $this->findBooking($booking),
                     BookingStatus::from($request->string('status')->toString()),
+                ),
+            ),
+        );
+    }
+
+    public function updateNidImage(
+        UpdateBookingNidImageRequest $request,
+        string $tenant,
+        int $booking,
+        UpdateBookingNidImageAction $updateBookingNidImageAction,
+    ): JsonResponse {
+        return $this->successResponse(
+            data: BookingDataResponse::fromBooking(
+                $updateBookingNidImageAction(
+                    $this->findBooking($booking),
+                    $tenant,
+                    $request->string('nid_image_url')->toString(),
+                ),
+            ),
+        );
+    }
+
+    public function assignRoom(
+        AssignBookingRoomRequest $request,
+        string $tenant,
+        int $booking,
+        AssignBookingRoomAction $assignBookingRoomAction,
+    ): JsonResponse {
+        return $this->successResponse(
+            data: BookingDataResponse::fromBooking(
+                $assignBookingRoomAction(
+                    $this->findBooking($booking),
+                    $tenant,
+                    $request->integer('room_id'),
+                    $request->string('assigned_room_number')->toString(),
                 ),
             ),
         );

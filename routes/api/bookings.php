@@ -38,6 +38,12 @@ Route::prefix('tenants/{tenant}')
         Route::patch('bookings/{booking}/status', [BookingController::class, 'updateStatus'])
             ->name('bookings.status.update');
 
+        Route::patch('bookings/{booking}/nid-image', [BookingController::class, 'updateNidImage'])
+            ->name('bookings.nid-image.update');
+
+        Route::patch('bookings/{booking}/assign-room', [BookingController::class, 'assignRoom'])
+            ->name('bookings.assign-room');
+
         Route::get('bookings/{booking}', [BookingController::class, 'show'])
             ->name('bookings.show');
     });
